@@ -23,17 +23,19 @@ def build_frame_index(df):
         fid = row.Frame_ID
         if fid not in index:
             index[fid] = {}
-        index[fid][row.Vehicle_ID] = (row.Local_X, row.Local_Y)
+        # 提取更多特征: (Local_X, Local_Y, v_Vel, v_Acc)
+        index[fid][row.Vehicle_ID] = (row.Local_X, row.Local_Y, row.v_Vel, row.v_Acc)
     return index
 
 
 def get_neighbor_ids(anchor_frame_id, ego_id, origin):
     frame_group = frame_index.get(anchor_frame_id, {})
-    ego_x, ego_y = origin
+    ego_x, ego_y = origin[0], origin[1]
     neighbors = []
-    for vid, (x, y) in frame_group.items():
+    for vid, features in frame_group.items():
         if vid == ego_id:
             continue
+        x, y = features[0], features[1]
         dist = np.sqrt((x - ego_x) ** 2 + (y - ego_y) ** 2)
         if dist < NEIGHBOR_RADIUS:
             neighbors.append((dist, vid))
@@ -46,7 +48,9 @@ def process_vehicle(args):
     vehicle_id, vehicle_data_records = args
 
     vehicle_data = pd.DataFrame(vehicle_data_records).sort_values("Frame_ID").reset_index(drop=True)
-    traj = vehicle_data[["Local_X", "Local_Y"]].values
+    
+    # 获取特征: X, Y, 速度, 加速度
+    traj = vehicle_data[["Local_X", "Local_Y", "v_Vel", "v_Acc"]].values
     frame_ids = vehicle_data["Frame_ID"].values
 
     total_len = len(traj)
@@ -65,16 +69,22 @@ def process_vehicle(args):
         hist = traj[start: start + HISTORY_LEN]
         fut = traj[start + HISTORY_LEN: start + HISTORY_LEN + FUTURE_LEN]
 
-        origin = hist[-1].copy()
-        hist_rel = hist - origin
-        fut_rel = fut - origin
+        # 原点是最后时刻的位置 (X, Y)
+        origin = hist[-1, :2].copy()
+        
+        hist_rel = hist.copy()
+        fut_rel = fut.copy()
+        
+        # 只在 X, Y 维度做相对坐标变换，速度和加速度(维度2和3)保持绝对值或原本数值
+        hist_rel[:, :2] = hist[:, :2] - origin
+        fut_rel[:, :2] = fut[:, :2] - origin
 
         anchor_frame_id = frame_ids[start + HISTORY_LEN - 1]
         neighbor_ids = get_neighbor_ids(anchor_frame_id, vehicle_id, origin)
 
         social_trajs = []
         for nid in neighbor_ids:
-            # 懒加载邻居缓存
+            # … (缓存机制略过)
             if nid not in neighbor_data_cache:
                 n_frame_group = {}
                 for fid in relevant_frame_ids:
@@ -88,13 +98,17 @@ def process_vehicle(args):
                 if fid in n_frame_map:
                     n_traj.append(n_frame_map[fid])
                 else:
-                    n_traj.append(tuple(origin))
-            n_traj = np.array(n_traj, dtype=np.float32) - origin
+                    # 如果缺失邻居帧，补一个和原点位置相同且速度、加速度为 0 的静止记录
+                    n_traj.append((origin[0], origin[1], 0.0, 0.0))
+            
+            n_traj = np.array(n_traj, dtype=np.float32)
+            n_traj[:, :2] = n_traj[:, :2] - origin
             social_trajs.append(n_traj)
 
         mask = [1] * len(social_trajs) + [0] * (MAX_NEIGHBORS - len(social_trajs))
         while len(social_trajs) < MAX_NEIGHBORS:
-            social_trajs.append(np.zeros((HISTORY_LEN, 2), dtype=np.float32))
+            # Pading 特征变成了 4 维 (X,Y,V,A)
+            social_trajs.append(np.zeros((HISTORY_LEN, 4), dtype=np.float32))
 
         social_trajs = np.stack(social_trajs, axis=0)
 

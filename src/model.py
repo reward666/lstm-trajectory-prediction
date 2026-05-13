@@ -1,43 +1,3 @@
-'''import torch
-import torch.nn as nn
-
-
-class LSTMModel(nn.Module):
-    def __init__(self, input_dim=2, hidden_dim=64, num_layers=2, output_len=50):
-        super().__init__()
-
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        self.output_len = output_len
-
-        # LSTM 编码历史轨迹
-        self.lstm = nn.LSTM(
-            input_dim,
-            hidden_dim,
-            num_layers,
-            batch_first=True
-        )
-
-        # 全连接层 → 输出未来轨迹
-        self.fc = nn.Linear(hidden_dim, output_len * 2)
-
-    def forward(self, x):
-        """
-        x: [B, 30, 2]
-        """
-
-        # LSTM 输出
-        _, (h_n, _) = self.lstm(x)
-
-        # 取最后一层 hidden state
-        h = h_n[-1]   # [B, hidden_dim]
-
-        out = self.fc(h)   # [B, 50*2]
-
-        # reshape 成轨迹
-        out = out.view(-1, self.output_len, 2)
-
-        return out'''
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -144,11 +104,21 @@ class SocialLSTMWithAttention(nn.Module):
         # Social Attention（跨车辆交互）
         self.social_attn = SocialAttention(hidden_dim)
 
-        # 融合自身 + 社会 context 后预测
-        self.fc = nn.Sequential(
+        # 融合自身 + 社会 context 后预测多模态轨迹
+        self.num_modes = 6 # 预测 6 种不同的未来轨迹
+        
+        # 轨迹预测头 (输出 6条轨迹 * 50帧 * X/Y二维坐标)
+        self.traj_head = nn.Sequential(
+            nn.Linear(hidden_dim * 2, hidden_dim * 2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim * 2, self.num_modes * output_len * 2),
+        )
+        
+        # 概率预测头 (每条轨迹的真实可能性)
+        self.prob_head = nn.Sequential(
             nn.Linear(hidden_dim * 2, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, output_len * 2),
+            nn.Linear(hidden_dim, self.num_modes)
         )
 
     def forward(self, x, x_social, mask=None):
@@ -177,7 +147,15 @@ class SocialLSTMWithAttention(nn.Module):
 
         # ── 融合 & 预测 ──
         combined = torch.cat([ego_ctx, social_ctx], dim=-1)   # [B, hidden_dim*2]
-        out = self.fc(combined)                               # [B, 50*2]
-        out = out.view(B, self.output_len, 2)                 # [B, 50, 2]
+        
+        # 1. 预测多条轨迹
+        out_traj = self.traj_head(combined)                                   # [B, 6*50*2]
+        out_traj = out_traj.view(B, self.num_modes, self.output_len, 2)       # [B, 6, 50, 2]
+        
+        # 2. 预测每条轨迹对应的置信度
+        out_prob = self.prob_head(combined)                                   # [B, 6]
+        
+        # 将概率过一遍 LogSoftmax 方便计算损失和最后取概率最大的作为最佳预测
+        out_prob = F.log_softmax(out_prob, dim=-1)
 
-        return out
+        return out_traj, out_prob

@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 
 
-RAW_DATA_PATH = Path("/mnt/d/datasets/ngsim/trajectories-0750am-0805am.txt")
+RAW_DATA_PATH = Path("data/law/trajectories-0750am-0805am.txt")
 PROCESSED_DIR = Path("data/processed")
 OUTPUT_PATH = PROCESSED_DIR / "ngsim_us101_0750_0805_processed.pkl"
 
@@ -56,6 +56,9 @@ def clean_ngsim_data(df: pd.DataFrame) -> pd.DataFrame:
         "Local_Y",
         "v_Vel",
         "v_Acc",
+        "v_Length",
+        "v_Width",
+        "v_Class",
         "Lane_ID",
     ]
 
@@ -71,6 +74,8 @@ def clean_ngsim_data(df: pd.DataFrame) -> pd.DataFrame:
     df["Local_Y"] = df["Local_Y"] * FEET_TO_METER
     df["v_Vel"] = df["v_Vel"] * FEET_TO_METER
     df["v_Acc"] = df["v_Acc"] * FEET_TO_METER
+    df["v_Length"] = df["v_Length"] * FEET_TO_METER
+    df["v_Width"] = df["v_Width"] * FEET_TO_METER
 
     df = df.sort_values(["Vehicle_ID", "Frame_ID"]).reset_index(drop=True)
 
