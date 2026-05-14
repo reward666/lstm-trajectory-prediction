@@ -49,7 +49,9 @@ def build_parser():
     parser.add_argument("--transformer_input_dim", type=int, default=4, help="Transformer input dimension")
     parser.add_argument("--transformer_d_model", type=int, default=64, help="Transformer hidden dimension")
     parser.add_argument("--transformer_nhead", type=int, default=4, help="Transformer attention heads")
-    parser.add_argument("--transformer_num_layers", type=int, default=2, help="Transformer encoder layers")
+    parser.add_argument("--transformer_num_layers", type=int, default=2, help="Transformer encoder and decoder layers")
+    parser.add_argument("--transformer_num_encoder_layers", type=int, default=None, help="Transformer encoder layers; defaults to --transformer_num_layers")
+    parser.add_argument("--transformer_num_decoder_layers", type=int, default=None, help="Transformer decoder layers; defaults to --transformer_num_layers")
     parser.add_argument("--transformer_dim_feedforward", type=int, default=128, help="Transformer feedforward dimension")
     parser.add_argument("--transformer_dropout", type=float, default=0.1, help="Transformer dropout")
     parser.add_argument("--transformer_output_len", type=int, default=50, help="Transformer prediction horizon")
@@ -223,6 +225,8 @@ def main():
         d_model=args.transformer_d_model,
         nhead=args.transformer_nhead,
         num_layers=args.transformer_num_layers,
+        num_encoder_layers=args.transformer_num_encoder_layers,
+        num_decoder_layers=args.transformer_num_decoder_layers,
         dim_feedforward=args.transformer_dim_feedforward,
         dropout=args.transformer_dropout,
         output_len=args.transformer_output_len,

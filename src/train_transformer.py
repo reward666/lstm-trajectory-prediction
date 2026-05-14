@@ -29,7 +29,9 @@ def build_parser():
     parser.add_argument("--input_dim", type=int, default=4, help="Input feature dimension")
     parser.add_argument("--d_model", type=int, default=64, help="Transformer hidden dimension")
     parser.add_argument("--nhead", type=int, default=4, help="Number of attention heads")
-    parser.add_argument("--num_layers", type=int, default=2, help="Number of encoder layers")
+    parser.add_argument("--num_layers", type=int, default=2, help="Number of encoder and decoder layers")
+    parser.add_argument("--num_encoder_layers", type=int, default=None, help="Number of Transformer encoder layers; defaults to --num_layers")
+    parser.add_argument("--num_decoder_layers", type=int, default=None, help="Number of Transformer decoder layers; defaults to --num_layers")
     parser.add_argument("--dim_feedforward", type=int, default=128, help="Feedforward dimension")
     parser.add_argument("--dropout", type=float, default=0.1, help="Dropout rate")
     parser.add_argument("--output_len", type=int, default=50, help="Number of future steps to predict")
@@ -84,7 +86,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device):
         y = y.to(device, non_blocking=True)
         target = y[:, :, :2]
 
-        pred = model(x)
+        pred = model(x, target)
         loss = criterion(pred, target)
 
         optimizer.zero_grad()
@@ -167,6 +169,8 @@ def main():
         d_model=args.d_model,
         nhead=args.nhead,
         num_layers=args.num_layers,
+        num_encoder_layers=args.num_encoder_layers,
+        num_decoder_layers=args.num_decoder_layers,
         dim_feedforward=args.dim_feedforward,
         dropout=args.dropout,
         output_len=args.output_len,
@@ -199,7 +203,25 @@ def main():
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             save_path = checkpoint_dir / "best_transformer_model.pt"
-            torch.save(model.state_dict(), save_path)
+            torch.save(
+                {
+                    "model_state_dict": model.state_dict(),
+                    "config": {
+                        "input_dim": args.input_dim,
+                        "d_model": args.d_model,
+                        "nhead": args.nhead,
+                        "num_layers": args.num_layers,
+                        "num_encoder_layers": args.num_encoder_layers,
+                        "num_decoder_layers": args.num_decoder_layers,
+                        "dim_feedforward": args.dim_feedforward,
+                        "dropout": args.dropout,
+                        "output_len": args.output_len,
+                    },
+                    "best_val_loss": best_val_loss,
+                    "epoch": epoch,
+                },
+                save_path,
+            )
             print(f"Saved best Transformer model to {save_path}")
 
     print("Transformer training finished.")
