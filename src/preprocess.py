@@ -1,13 +1,9 @@
-import pandas as pd
-import numpy as np
+import argparse
 from pathlib import Path
 
+import pandas as pd
 
-RAW_DATA_PATH = Path("data/law/trajectories-0750am-0805am.txt")
-PROCESSED_DIR = Path("data/processed")
-OUTPUT_PATH = PROCESSED_DIR / "ngsim_us101_0750_0805_processed.pkl"
-
-FEET_TO_METER = 0.3048
+from config import DEFAULT_PROCESSED_DATA_PATH, DEFAULT_RAW_DATA_PATH, FEET_TO_METER
 
 
 def load_raw_data(path: Path) -> pd.DataFrame:
@@ -107,17 +103,44 @@ def save_processed_data(df: pd.DataFrame, output_path: Path) -> None:
     print(f"\nSaved processed data to: {output_path}")
 
 
-def main():
-    print(f"Loading raw data from: {RAW_DATA_PATH}")
+def build_parser():
+    parser = argparse.ArgumentParser(description="Preprocess raw NGSIM trajectory text data.")
+    parser.add_argument(
+        "--raw_path",
+        type=Path,
+        default=DEFAULT_RAW_DATA_PATH,
+        help="Path to the raw NGSIM trajectory .txt file",
+    )
+    parser.add_argument(
+        "--output_path",
+        type=Path,
+        default=DEFAULT_PROCESSED_DATA_PATH,
+        help="Path for the processed .pkl file",
+    )
+    return parser
 
-    df_raw = load_raw_data(RAW_DATA_PATH)
+
+def main():
+    args = build_parser().parse_args()
+
+    print(f"Loading raw data from: {args.raw_path}")
+
+    try:
+        df_raw = load_raw_data(args.raw_path)
+    except FileNotFoundError as exc:
+        raise SystemExit(
+            f"{exc}\n"
+            "请先运行 `python src/download_data.py --url <DATA_URL>` 下载数据，"
+            "或用 `--raw_path` 指向服务器上的原始轨迹文件。"
+        ) from exc
+
     print(f"Raw data shape: {df_raw.shape}")
 
     df_processed = clean_ngsim_data(df_raw)
 
     print_summary(df_processed)
 
-    save_processed_data(df_processed, OUTPUT_PATH)
+    save_processed_data(df_processed, args.output_path)
 
 
 if __name__ == "__main__":

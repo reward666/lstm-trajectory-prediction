@@ -1,16 +1,19 @@
-import pandas as pd
-import numpy as np
-from pathlib import Path
+import argparse
 from multiprocessing import Pool, cpu_count
+from pathlib import Path
 
-PROCESSED_DATA_PATH = Path("data/processed/ngsim_us101_0750_0805_processed.pkl")
-OUTPUT_DIR = Path("data/processed")
+import numpy as np
+import pandas as pd
 
-HISTORY_LEN = 30
-FUTURE_LEN = 50
-STEP = 5
-MAX_NEIGHBORS = 5
-NEIGHBOR_RADIUS = 30.0
+from config import (
+    DEFAULT_PROCESSED_DATA_PATH,
+    FUTURE_LEN,
+    HISTORY_LEN,
+    MAX_NEIGHBORS,
+    NEIGHBOR_RADIUS,
+    PROCESSED_DATA_DIR,
+    STEP,
+)
 
 # 全局变量，子进程共享
 frame_index = {}
@@ -134,9 +137,39 @@ def init_worker(fi):
     frame_index = fi
 
 
+def build_parser():
+    parser = argparse.ArgumentParser(description="Build social trajectory samples from processed data.")
+    parser.add_argument(
+        "--processed_path",
+        type=Path,
+        default=DEFAULT_PROCESSED_DATA_PATH,
+        help="Input processed .pkl path",
+    )
+    parser.add_argument(
+        "--output_dir",
+        type=Path,
+        default=PROCESSED_DATA_DIR,
+        help="Directory for .npy sample files",
+    )
+    parser.add_argument(
+        "--num_workers",
+        type=int,
+        default=max(1, cpu_count() - 1),
+        help="Multiprocessing worker count",
+    )
+    return parser
+
+
 def main():
-    print(f"Loading processed data from: {PROCESSED_DATA_PATH}")
-    df = pd.read_pickle(PROCESSED_DATA_PATH)
+    args = build_parser().parse_args()
+
+    print(f"Loading processed data from: {args.processed_path}")
+    if not args.processed_path.exists():
+        raise SystemExit(
+            f"处理后文件不存在: {args.processed_path}\n"
+            "请先运行 `python src/preprocess.py --raw_path <RAW_TXT>`。"
+        )
+    df = pd.read_pickle(args.processed_path)
 
     print("Building frame index...")
     fi = build_frame_index(df)
@@ -148,7 +181,7 @@ def main():
         for vid, group in df.groupby("Vehicle_ID")
     ]
 
-    num_workers = max(1, cpu_count() - 1)
+    num_workers = max(1, args.num_workers)
     print(f"Using {num_workers} workers (total CPUs: {cpu_count()})")
     print(f"Total vehicles: {len(vehicle_groups)}")
 
@@ -159,11 +192,13 @@ def main():
     # 过滤空结果并合并
     results = [r for r in results if r is not None]
     print(f"Valid vehicles: {len(results)}")
+    if not results:
+        raise SystemExit("没有生成有效样本，请检查数据长度或窗口参数。")
 
-    X        = np.concatenate([r[0] for r in results], axis=0)
-    Y        = np.concatenate([r[1] for r in results], axis=0)
+    X = np.concatenate([r[0] for r in results], axis=0)
+    Y = np.concatenate([r[1] for r in results], axis=0)
     X_social = np.concatenate([r[2] for r in results], axis=0)
-    masks    = np.concatenate([r[3] for r in results], axis=0)
+    masks = np.concatenate([r[3] for r in results], axis=0)
 
     print("=" * 60)
     print("Dataset Summary")
@@ -173,13 +208,13 @@ def main():
     print(f"X_social shape: {X_social.shape}")
     print(f"masks shape:    {masks.shape}")
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    np.save(OUTPUT_DIR / "X.npy", X)
-    np.save(OUTPUT_DIR / "Y.npy", Y)
-    np.save(OUTPUT_DIR / "X_social.npy", X_social)
-    np.save(OUTPUT_DIR / "social_masks.npy", masks)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    np.save(args.output_dir / "X.npy", X)
+    np.save(args.output_dir / "Y.npy", Y)
+    np.save(args.output_dir / "X_social.npy", X_social)
+    np.save(args.output_dir / "social_masks.npy", masks)
 
-    print(f"\nSaved to {OUTPUT_DIR}")
+    print(f"\nSaved to {args.output_dir}")
 
 
 if __name__ == "__main__":

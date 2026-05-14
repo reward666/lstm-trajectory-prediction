@@ -1,51 +1,40 @@
-import pandas as pd
-import numpy as np
+import argparse
 from pathlib import Path
 
+import numpy as np
+import pandas as pd
 
-PROCESSED_DATA_PATH = Path("data/processed/ngsim_us101_0750_0805_processed.pkl")
-OUTPUT_DIR = Path("data/processed")
-
-HISTORY_LEN = 30   # 过去 3 秒，NGSIM 是 10Hz
-FUTURE_LEN = 50    # 未来 5 秒
-STEP = 5           # 滑动窗口步长，先设为 5，减少样本量
+from config import DEFAULT_PROCESSED_DATA_PATH, FUTURE_LEN, HISTORY_LEN, PROCESSED_DATA_DIR, STEP
 
 
-def build_trajectory_samples(df: pd.DataFrame):
+def build_trajectory_samples(df: pd.DataFrame, history_len=HISTORY_LEN, future_len=FUTURE_LEN, step=STEP):
     """
     把原始逐帧数据变成 LSTM 训练样本。
 
     每个样本：
-        X: 过去 HISTORY_LEN 帧的位置 [30, 2]
-        Y: 未来 FUTURE_LEN 帧的位置 [50, 2]
+        X: 过去 history_len 帧的位置 [history_len, 2]
+        Y: 未来 future_len 帧的位置 [future_len, 2]
     """
 
     X_list = []
     Y_list = []
 
-    # 按车辆 ID 分组，每辆车单独构造轨迹
     grouped = df.groupby("Vehicle_ID")
 
-    for vehicle_id, vehicle_data in grouped:
-        # 保证每辆车内部按时间排序
+    for _, vehicle_data in grouped:
         vehicle_data = vehicle_data.sort_values("Frame_ID")
-
-        # 只取位置坐标
         traj = vehicle_data[["Local_X", "Local_Y"]].values
 
-        # 轨迹长度不够就跳过
         total_len = len(traj)
-        needed_len = HISTORY_LEN + FUTURE_LEN
+        needed_len = history_len + future_len
 
         if total_len < needed_len:
             continue
 
-        # 滑动窗口构造样本
-        for start in range(0, total_len - needed_len + 1, STEP):
-            hist = traj[start : start + HISTORY_LEN]
-            fut = traj[start + HISTORY_LEN : start + HISTORY_LEN + FUTURE_LEN]
+        for start in range(0, total_len - needed_len + 1, step):
+            hist = traj[start: start + history_len]
+            fut = traj[start + history_len: start + history_len + future_len]
 
-            # 以历史轨迹最后一个点作为原点，做相对坐标
             origin = hist[-1].copy()
 
             hist_rel = hist - origin
@@ -60,13 +49,30 @@ def build_trajectory_samples(df: pd.DataFrame):
     return X, Y
 
 
-def main():
-    print(f"Loading processed data from: {PROCESSED_DATA_PATH}")
+def build_parser():
+    parser = argparse.ArgumentParser(description="Build simple trajectory samples from processed data.")
+    parser.add_argument("--processed_path", type=Path, default=DEFAULT_PROCESSED_DATA_PATH, help="Input processed .pkl path")
+    parser.add_argument("--output_dir", type=Path, default=PROCESSED_DATA_DIR, help="Directory for X.npy and Y.npy")
+    parser.add_argument("--history_len", type=int, default=HISTORY_LEN, help="Historical frame count")
+    parser.add_argument("--future_len", type=int, default=FUTURE_LEN, help="Future frame count")
+    parser.add_argument("--step", type=int, default=STEP, help="Sliding window step")
+    return parser
 
-    df = pd.read_pickle(PROCESSED_DATA_PATH)
+
+def main():
+    args = build_parser().parse_args()
+
+    print(f"Loading processed data from: {args.processed_path}")
+    if not args.processed_path.exists():
+        raise SystemExit(
+            f"处理后文件不存在: {args.processed_path}\n"
+            "请先运行 `python src/preprocess.py --raw_path <RAW_TXT>`。"
+        )
+
+    df = pd.read_pickle(args.processed_path)
 
     print("Building trajectory samples...")
-    X, Y = build_trajectory_samples(df)
+    X, Y = build_trajectory_samples(df, args.history_len, args.future_len, args.step)
 
     print("=" * 60)
     print("Dataset Summary")
@@ -74,14 +80,14 @@ def main():
     print(f"X shape: {X.shape}")
     print(f"Y shape: {Y.shape}")
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    np.save(OUTPUT_DIR / "X.npy", X)
-    np.save(OUTPUT_DIR / "Y.npy", Y)
+    np.save(args.output_dir / "X.npy", X)
+    np.save(args.output_dir / "Y.npy", Y)
 
     print("\nSaved:")
-    print(OUTPUT_DIR / "X.npy")
-    print(OUTPUT_DIR / "Y.npy")
+    print(args.output_dir / "X.npy")
+    print(args.output_dir / "Y.npy")
 
 
 if __name__ == "__main__":
