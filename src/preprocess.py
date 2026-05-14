@@ -1,45 +1,81 @@
-import pandas as pd
-import numpy as np
+import argparse
 from pathlib import Path
 
+import pandas as pd
 
-RAW_DATA_PATH = Path("data/law/trajectories-0750am-0805am.txt")
-PROCESSED_DIR = Path("data/processed")
-OUTPUT_PATH = PROCESSED_DIR / "ngsim_us101_0750_0805_processed.pkl"
+from config import DEFAULT_PROCESSED_DATA_PATH, DEFAULT_RAW_DATA_PATH, FEET_TO_METER
 
-FEET_TO_METER = 0.3048
+NGSIM_COLUMNS = [
+    "Vehicle_ID",
+    "Frame_ID",
+    "Total_Frames",
+    "Global_Time",
+    "Local_X",
+    "Local_Y",
+    "Global_X",
+    "Global_Y",
+    "v_Length",
+    "v_Width",
+    "v_Class",
+    "v_Vel",
+    "v_Acc",
+    "Lane_ID",
+    "Preceding",
+    "Following",
+    "Space_Headway",
+    "Time_Headway",
+]
+
+COLUMN_ALIASES = {
+    "vehicle_id": "Vehicle_ID",
+    "frame_id": "Frame_ID",
+    "total_frames": "Total_Frames",
+    "global_time": "Global_Time",
+    "local_x": "Local_X",
+    "local_y": "Local_Y",
+    "global_x": "Global_X",
+    "global_y": "Global_Y",
+    "v_length": "v_Length",
+    "v_width": "v_Width",
+    "v_class": "v_Class",
+    "v_vel": "v_Vel",
+    "v_acc": "v_Acc",
+    "lane_id": "Lane_ID",
+    "preceding": "Preceding",
+    "following": "Following",
+    "space_headway": "Space_Headway",
+    "time_headway": "Time_Headway",
+}
+
+
+def has_header(path: Path) -> bool:
+    with path.open("r", encoding="utf-8", errors="ignore") as file_obj:
+        first_line = file_obj.readline().strip().lower()
+    return any(alias in first_line for alias in COLUMN_ALIASES)
+
+
+def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map = {}
+    for column in df.columns:
+        normalized = str(column).strip().lower().replace(" ", "_")
+        if normalized in COLUMN_ALIASES:
+            rename_map[column] = COLUMN_ALIASES[normalized]
+    return df.rename(columns=rename_map)
 
 
 def load_raw_data(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"文件不存在: {path}")
 
-    columns = [
-        "Vehicle_ID",
-        "Frame_ID",
-        "Total_Frames",
-        "Global_Time",
-        "Local_X",
-        "Local_Y",
-        "Global_X",
-        "Global_Y",
-        "v_Length",
-        "v_Width",
-        "v_Class",
-        "v_Vel",
-        "v_Acc",
-        "Lane_ID",
-        "Preceding",
-        "Following",
-        "Space_Headway",
-        "Time_Headway",
-    ]
+    if has_header(path):
+        df = pd.read_csv(path)
+        return normalize_column_names(df)
 
     df = pd.read_csv(
         path,
         sep=r"\s+",     # 空格分隔（关键）
         header=None,    # 没有表头（关键）
-        names=columns,  # 手动指定列名（关键）
+        names=NGSIM_COLUMNS,  # 手动指定列名（关键）
         engine="python",
     )
 
@@ -107,17 +143,44 @@ def save_processed_data(df: pd.DataFrame, output_path: Path) -> None:
     print(f"\nSaved processed data to: {output_path}")
 
 
-def main():
-    print(f"Loading raw data from: {RAW_DATA_PATH}")
+def build_parser():
+    parser = argparse.ArgumentParser(description="Preprocess raw NGSIM trajectory text/CSV data.")
+    parser.add_argument(
+        "--raw_path",
+        type=Path,
+        default=DEFAULT_RAW_DATA_PATH,
+        help="Path to the raw NGSIM trajectory .txt or .csv file",
+    )
+    parser.add_argument(
+        "--output_path",
+        type=Path,
+        default=DEFAULT_PROCESSED_DATA_PATH,
+        help="Path for the processed .pkl file",
+    )
+    return parser
 
-    df_raw = load_raw_data(RAW_DATA_PATH)
+
+def main():
+    args = build_parser().parse_args()
+
+    print(f"Loading raw data from: {args.raw_path}")
+
+    try:
+        df_raw = load_raw_data(args.raw_path)
+    except FileNotFoundError as exc:
+        raise SystemExit(
+            f"{exc}\n"
+            "请先运行 `python src/download_data.py --url <DATA_URL>` 下载数据，"
+            "或用 `--raw_path` 指向服务器上的原始轨迹文件。"
+        ) from exc
+
     print(f"Raw data shape: {df_raw.shape}")
 
     df_processed = clean_ngsim_data(df_raw)
 
     print_summary(df_processed)
 
-    save_processed_data(df_processed, OUTPUT_PATH)
+    save_processed_data(df_processed, args.output_path)
 
 
 if __name__ == "__main__":
