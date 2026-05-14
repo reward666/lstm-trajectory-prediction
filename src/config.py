@@ -1,0 +1,24 @@
+from pathlib import Path
+
+DATA_DIR = Path("data")
+RAW_DATA_DIR = DATA_DIR / "raw"
+PROCESSED_DATA_DIR = DATA_DIR / "processed"
+
+DEFAULT_RAW_FILENAME = "trajectories-0750am-0805am.txt"
+DEFAULT_RAW_DATA_PATH = RAW_DATA_DIR / DEFAULT_RAW_FILENAME
+DEFAULT_PROCESSED_FILENAME = "ngsim_us101_0750_0805_processed.pkl"
+DEFAULT_PROCESSED_DATA_PATH = PROCESSED_DATA_DIR / DEFAULT_PROCESSED_FILENAME
+
+SAMPLE_FILES = {
+    "x": "X.npy",
+    "y": "Y.npy",
+    "x_social": "X_social.npy",
+    "mask": "social_masks.npy",
+}
+
+FEET_TO_METER = 0.3048
+HISTORY_LEN = 30
+FUTURE_LEN = 50
+STEP = 5
+MAX_NEIGHBORS = 5
+NEIGHBOR_RADIUS = 30.0
