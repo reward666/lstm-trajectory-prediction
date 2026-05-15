@@ -5,37 +5,77 @@ import pandas as pd
 
 from config import DEFAULT_PROCESSED_DATA_PATH, DEFAULT_RAW_DATA_PATH, FEET_TO_METER
 
+NGSIM_COLUMNS = [
+    "Vehicle_ID",
+    "Frame_ID",
+    "Total_Frames",
+    "Global_Time",
+    "Local_X",
+    "Local_Y",
+    "Global_X",
+    "Global_Y",
+    "v_Length",
+    "v_Width",
+    "v_Class",
+    "v_Vel",
+    "v_Acc",
+    "Lane_ID",
+    "Preceding",
+    "Following",
+    "Space_Headway",
+    "Time_Headway",
+]
+
+COLUMN_ALIASES = {
+    "vehicle_id": "Vehicle_ID",
+    "frame_id": "Frame_ID",
+    "total_frames": "Total_Frames",
+    "global_time": "Global_Time",
+    "local_x": "Local_X",
+    "local_y": "Local_Y",
+    "global_x": "Global_X",
+    "global_y": "Global_Y",
+    "v_length": "v_Length",
+    "v_width": "v_Width",
+    "v_class": "v_Class",
+    "v_vel": "v_Vel",
+    "v_acc": "v_Acc",
+    "lane_id": "Lane_ID",
+    "preceding": "Preceding",
+    "following": "Following",
+    "space_headway": "Space_Headway",
+    "time_headway": "Time_Headway",
+}
+
+
+def has_header(path: Path) -> bool:
+    with path.open("r", encoding="utf-8", errors="ignore") as file_obj:
+        first_line = file_obj.readline().strip().lower()
+    return any(alias in first_line for alias in COLUMN_ALIASES)
+
+
+def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map = {}
+    for column in df.columns:
+        normalized = str(column).strip().lower().replace(" ", "_")
+        if normalized in COLUMN_ALIASES:
+            rename_map[column] = COLUMN_ALIASES[normalized]
+    return df.rename(columns=rename_map)
+
 
 def load_raw_data(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"文件不存在: {path}")
 
-    columns = [
-        "Vehicle_ID",
-        "Frame_ID",
-        "Total_Frames",
-        "Global_Time",
-        "Local_X",
-        "Local_Y",
-        "Global_X",
-        "Global_Y",
-        "v_Length",
-        "v_Width",
-        "v_Class",
-        "v_Vel",
-        "v_Acc",
-        "Lane_ID",
-        "Preceding",
-        "Following",
-        "Space_Headway",
-        "Time_Headway",
-    ]
+    if has_header(path):
+        df = pd.read_csv(path)
+        return normalize_column_names(df)
 
     df = pd.read_csv(
         path,
         sep=r"\s+",     # 空格分隔（关键）
         header=None,    # 没有表头（关键）
-        names=columns,  # 手动指定列名（关键）
+        names=NGSIM_COLUMNS,  # 手动指定列名（关键）
         engine="python",
     )
 
@@ -104,12 +144,12 @@ def save_processed_data(df: pd.DataFrame, output_path: Path) -> None:
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Preprocess raw NGSIM trajectory text data.")
+    parser = argparse.ArgumentParser(description="Preprocess raw NGSIM trajectory text/CSV data.")
     parser.add_argument(
         "--raw_path",
         type=Path,
         default=DEFAULT_RAW_DATA_PATH,
-        help="Path to the raw NGSIM trajectory .txt file",
+        help="Path to the raw NGSIM trajectory .txt or .csv file",
     )
     parser.add_argument(
         "--output_path",

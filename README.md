@@ -33,9 +33,9 @@ pip install -r requirements.txt
 
 ```bash
 python src/download_data.py \
-  --url "<DATA_URL>" \
+  --url "https://data.transportation.gov/api/views/8ect-6jqj/rows.csv?accessType=DOWNLOAD" \
   --output_dir data/raw \
-  --filename trajectories-0750am-0805am.txt
+  --filename ngsim_vehicle_trajectories.csv
 ```
 
 如果下载的是压缩包，可以加 `--extract`：
@@ -59,7 +59,7 @@ python src/download_data.py \
 
 ## 3. 预处理原始轨迹文件
 
-默认读取 `data/raw/trajectories-0750am-0805am.txt`，输出 `data/processed/ngsim_us101_0750_0805_processed.pkl`：
+默认读取 `data/raw/trajectories-0750am-0805am.txt`，输出 `data/processed/ngsim_us101_0750_0805_processed.pkl`。如果你从 U.S. DOT Export 下载的是 CSV，也可以直接把 `--raw_path` 指向 CSV：
 
 ```bash
 python src/preprocess.py
@@ -69,8 +69,8 @@ python src/preprocess.py
 
 ```bash
 python src/preprocess.py \
-  --raw_path data/raw/trajectories-0750am-0805am.txt \
-  --output_path data/processed/ngsim_us101_0750_0805_processed.pkl
+  --raw_path data/raw/ngsim_vehicle_trajectories.csv \
+  --output_path data/processed/ngsim_processed.pkl
 ```
 
 ## 4. 构造训练样本
@@ -119,8 +119,8 @@ python src/train_transformer.py \
 
 ```bash
 pip install -r requirements.txt
-python src/download_data.py --url "<DATA_URL>" --output_dir data/raw --filename trajectories-0750am-0805am.txt
-python src/preprocess.py --raw_path data/raw/trajectories-0750am-0805am.txt
+python src/download_data.py --url "https://data.transportation.gov/api/views/8ect-6jqj/rows.csv?accessType=DOWNLOAD" --output_dir data/raw --filename ngsim_vehicle_trajectories.csv
+python src/preprocess.py --raw_path data/raw/ngsim_vehicle_trajectories.csv --output_path data/processed/ngsim_processed.pkl
 python src/buildsample.py --num_workers 8
 python src/train.py --wandb_mode offline
 ```
