@@ -104,11 +104,20 @@ class TrajectoryDataset(Dataset):
 
         return x, y, x_social, mask
 
-def wta_loss(pred_traj, prob, target_traj):
+def multimodal_loss(
+    pred_traj,
+    log_prob,
+    target_traj,
+    tau=2.0,
+    cls_weight=1.0,
+    div_weight=0.1,
+    ent_weight=0.002,
+    div_margin=3.0,
+):
     """
-    Winner-Takes-All (WTA) 多模态损失函数。
+    Soft-WTA + Diversity + Entropy 多模态损失函数。
     pred_traj: [B, 6, 50, 2]     预测的 M 条未来轨迹
-    prob:      [B, 6]            (Log_Softmax后)的 M 个概率
+    log_prob:  [B, 6]            (Log_Softmax后)的 M 个概率
     target_traj: [B, 50, 4]      真实的未来轨迹 (X, Y, V, A) 
     """
     B, M, T, D_pred = pred_traj.shape
@@ -118,25 +127,39 @@ def wta_loss(pred_traj, prob, target_traj):
     
     target_traj_exp = target_coord.unsqueeze(1).expand(B, M, T, D_pred)
     
-    # 算出每条预测轨迹和真实轨迹在未来 50 帧所有点上的 L2 误差（均方误差的和 / FDE等）
-    # 对每条轨迹的所有时间步求和 (T, D) => 结果 [B, M]
+    # 算出每条预测轨迹和真实轨迹在未来 50 帧所有点上的 L2 误差
+    # 对每条轨迹的所有时间步求和 (T, D) => [B, M]
     traj_mse = torch.sum((pred_traj - target_traj_exp) ** 2, dim=(2, 3))
-    
-    # 找出 M 条候选中，距离 Ground Truth 最小的那一条 (Winner)
-    # _, best_indices 的大小为 [B]
-    best_traj_dist, best_indices = torch.min(traj_mse, dim=1)
-    
-    # 1. 回归部分 (MSE Loss)：只惩罚最好的那条轨迹的坐标误差，不管其他 5 条预测错成了什么样
-    # 对所有 batch 取平均
-    reg_loss = best_traj_dist.mean()
-    
-    # 2. 分类部分 (Log-Likelihood Loss)：最大化那条赢家轨迹被选中的概率
-    # prob[torch.arange(B), best_indices] 是提取每个样本真实命中的那个轨道的 Log 概率
-    cls_loss = -prob[torch.arange(B), best_indices].mean() 
 
-    # 把这两部分 loss 加起来。因为数量级可能不一样，分类通常可以直接原样加上去
-    loss = reg_loss + cls_loss
-    return loss
+    # Soft-WTA：让多个接近 GT 的 mode 都能分到梯度，避免 mode collapse
+    responsibilities = torch.softmax(-traj_mse / tau, dim=1)
+    reg_loss = (responsibilities.detach() * traj_mse).sum(dim=1).mean()
+
+    # 分类项：让概率头拟合 soft responsibility 分布，而不是硬 winner
+    cls_loss = -(responsibilities.detach() * log_prob).sum(dim=1).mean()
+
+    # 多样性项：鼓励不同 mode 的终点彼此分离
+    endpoints = pred_traj[:, :, -1, :]  # [B, M, 2]
+    pairwise_dist = torch.cdist(endpoints, endpoints, p=2)
+    upper_tri = torch.triu(torch.ones(M, M, device=pred_traj.device, dtype=torch.bool), diagonal=1)
+    pairwise_dist = pairwise_dist[:, upper_tri]
+    div_loss = torch.relu(div_margin - pairwise_dist).mean()
+
+    # 熵项：防止概率过快单峰化
+    prob = log_prob.exp()
+    entropy = -(prob * log_prob).sum(dim=1).mean()
+    entropy_loss = -entropy
+
+    loss = reg_loss + cls_weight * cls_loss + div_weight * div_loss + ent_weight * entropy_loss
+
+    metrics = {
+        "reg_loss": reg_loss.detach(),
+        "cls_loss": cls_loss.detach(),
+        "div_loss": div_loss.detach(),
+        "entropy": entropy.detach(),
+        "mode_spread": pairwise_dist.mean().detach(),
+    }
+    return loss, metrics
 
 
 def train_one_epoch(model, dataloader, optimizer, epoch, device, grad_clip):
@@ -152,7 +175,7 @@ def train_one_epoch(model, dataloader, optimizer, epoch, device, grad_clip):
         mask = mask.to(device, non_blocking=True)
 
         pred_traj, pred_prob = model(x, x_social, mask)
-        loss = wta_loss(pred_traj, pred_prob, y)
+        loss, metrics = multimodal_loss(pred_traj, pred_prob, y)
 
         optimizer.zero_grad()
         loss.backward()
@@ -164,7 +187,8 @@ def train_one_epoch(model, dataloader, optimizer, epoch, device, grad_clip):
         total_loss += loss.item() * x.size(0)
 
         pbar.set_postfix({
-            "batch_loss": f"{loss.item():.6f}"
+            "batch_loss": f"{loss.item():.6f}",
+            "spread": f"{metrics['mode_spread'].item():.4f}"
         })
 
     return total_loss / len(dataloader.dataset)
@@ -184,12 +208,13 @@ def evaluate(model, dataloader, epoch, device):
             mask = mask.to(device, non_blocking=True)
 
             pred_traj, pred_prob = model(x, x_social, mask)
-            loss = wta_loss(pred_traj, pred_prob, y)
+            loss, metrics = multimodal_loss(pred_traj, pred_prob, y)
 
             total_loss += loss.item() * x.size(0)
 
             pbar.set_postfix({
-                "val_batch_loss": f"{loss.item():.6f}"
+                "val_batch_loss": f"{loss.item():.6f}",
+                "spread": f"{metrics['mode_spread'].item():.4f}"
             })
 
     return total_loss / len(dataloader.dataset)
